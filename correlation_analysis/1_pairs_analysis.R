@@ -1,27 +1,41 @@
-install.packages("moments")
-library(moments)
-
 options(scipen=5)
 songs <- read.csv(file = 'tiktok.csv')
 
 
 
-check_correlation <- function(x, y, alpha){
+check_correlation <- function(x, y, alpha=0.05){
   n <- length(x)
   p <- 2
   indcor <- summary(lm(x ~ y))$r.squared
-  f <- (indcor/(1-indcor))*((n-p)/(p-1))
-  fa <- qf(1-alpha, p-1, n-p)
-  if(f < fa){
-    print("Зв'язок між змінними не є істотним.")
-    print("Прийнято припущення про незначимість індексу кореляції:")
-    print(paste(f, "<", fa))
+  print(paste("Індекс кореляції:", indcor))
+
+  if(indcor == 0){
+    print("Зв'язку між змінними немає.")
+  } else if (indcor == 1){
+    print("Зв'язок між змінними функціональний.")
   } else {
-    print("Зв'язок між змінними є істотним.")
-    print("Припущення про незначимість індексу кореляції не прийнято:")
-    print(paste(f, ">=", fa))
-  }
+  
+    # Перевірка гіпотези I=0
+    f <- (indcor/(1-indcor))*((n-p)/(p-1))
+    fa <- qf(1-alpha, p-1, n-p)
+    
+    if(f < fa){
+      print("Зв'язок між змінними не є істотним.")
+      print("Прийнято гіпотезу про незначимість індексу кореляції:")
+      print(paste(f, "<", fa))
+    } else {
+      print("Зв'язок між змінними є істотним.")
+      print("Гіпотезу про незначимість індексу кореляції не прийнято:")
+      print(paste(f, ">=", fa))
+    }
+  
+    }
+  return(indcor)
 }
+
+
+install.packages("nloptr")
+library("nloptr")
 
 max_alpha <- function(x, y){
   n <- length(x)
@@ -29,16 +43,42 @@ max_alpha <- function(x, y){
   indcor <- summary(lm(x ~ y))$r.squared
   f <- (indcor/(1-indcor))*((n-p)/(p-1))
   
-  calc_fa <- function(alp) {
-    t_fa <- qf(1-alp, p-1, n-p)
-    if (t_fa < f) {
-      return(f+1)
-    }
-    return(t_fa)
+  eval_fa <- function(x){
+    return (qf(1-x, p-1, n-p))
   }
   
-  return(optimise(calc_fa, interval = c(0, 1), tol = 0.0000001)$minimum)
+  tol <- 10^-7
+  eval_g_ineq <- function(x){
+    return (f - eval_fa(x)+tol)
+  }
+
+  lb <- 0
+  ub <- 1
+  x0 <- 0.05
+  
+  local_opts <- list( "algorithm" = "NLOPT_LD_MMA", "xtol_rel" = 1.0e-15 )
+  opts <- list( "algorithm"= "NLOPT_GN_ISRES",
+                "xtol_rel"= 1.0e-15,
+                "maxeval"= 160000,
+                "local_opts" = local_opts,
+                "print_level" = 0 )
+  
+  res <- nloptr ( x0 = x0,
+                  eval_f = eval_fa,
+                  lb = lb,
+                  ub = ub,
+                  eval_g_ineq = eval_g_ineq,
+                  opts = opts
+  )
+  
+  return(floor(res$solution/tol)*tol)
 }
 
+check_correlation(songs$duration, songs$popularity)
+check_correlation(songs$duration, songs$tempo)
+check_correlation(songs$popularity, songs$tempo)
 
+max_alpha(songs$duration, songs$popularity)
+max_alpha(songs$duration, songs$tempo)
+max_alpha(songs$popularity, songs$tempo)
 
